@@ -5,6 +5,8 @@ import android.media.SoundPool
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,11 +20,10 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -44,9 +45,6 @@ private val grupoTarjetas = listOf(
     listOf("🤡", "💩", "🎃", "🙀"),
     listOf("☠️", "👾", "😽", "😼")
 )
-
-
-
 
 data class LevelData(
     val tarjetas: List<String>,
@@ -132,17 +130,13 @@ class MainActivity : ComponentActivity() {
 // --- PANTALLAS ---
 @Composable
 fun WelcomeScreen(onNormalClick: () -> Unit, onRelaxClick: () -> Unit) {
-    // Usamos un Box como contenedor principal para poder alinear elementos
-    // en diferentes partes de la pantalla.
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp) // Agregamos padding general aquí
+            .padding(16.dp)
     ) {
-        // 1. Contenido principal (el saludo y los botones)
-        // Lo ponemos en una Column y alineamos toda la Column en el centro del Box.
         Column(
-            modifier = Modifier.align(Alignment.Center), // Esto centra el bloque vertical y horizontalmente
+            modifier = Modifier.align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("👋 ¡Bienvenido! 👋", style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center)
@@ -152,10 +146,8 @@ fun WelcomeScreen(onNormalClick: () -> Unit, onRelaxClick: () -> Unit) {
             Button(onClick = onRelaxClick, modifier = Modifier.fillMaxWidth()) { Text("Modo relax") }
         }
 
-
-
         Text(
-            text = "Desarrolladopor: Ronald D. Condori",
+            text = "Desarrollado por: Ronald D. Condori",
             modifier = Modifier.align(Alignment.BottomCenter),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
@@ -169,9 +161,7 @@ fun LevelSelectScreen(onLevelSelected: (Int) -> Unit, onBack: () -> Unit) {
     Scaffold(
         topBar = { TopAppBar(title = { Text("Selecciona un Nivel") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Volver") } }) }
     ) {
-        LazyColumn(modifier = Modifier
-            .padding(it)
-            .fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(modifier = Modifier.padding(it).fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(levels.size) { index ->
                 Button(onClick = { onLevelSelected(index) }, modifier = Modifier.fillMaxWidth()) { Text("Nivel ${index + 1}") }
             }
@@ -189,38 +179,23 @@ fun formatNumber(num: Int): String = if (num < 10) "0$num" else "$num"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GameMemoryApp(
-    soundPlayer: SoundPlayer?,
-    startLevelIndex: Int,
-    relaxMode: Boolean,
-    onNavigateBack: () -> Unit
-) {
+fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Boolean, onNavigateBack: () -> Unit) {
     var currentLevelIndex by remember { mutableStateOf(startLevelIndex) }
     val currentLevel = levels.getOrElse(currentLevelIndex) { levels.first() }
 
     var cards by remember(currentLevelIndex) { mutableStateOf(generateCards(currentLevel.tarjetas)) }
     var movimientos by remember(currentLevelIndex) { mutableStateOf(0) }
+    var segundos by remember(currentLevelIndex) { mutableStateOf(currentLevel.timeLimitSeconds % 60) }
+    var minutos by remember(currentLevelIndex) { mutableStateOf(currentLevel.timeLimitSeconds / 60) }
     var menuExpanded by remember { mutableStateOf(false) }
     var isComparing by remember { mutableStateOf(false) }
 
-    // --- CAMBIO 1: Única fuente de verdad para el tiempo ---
-    var remainingTimeInSeconds by remember(currentLevelIndex) {
-        mutableStateOf(currentLevel.timeLimitSeconds)
-    }
-    // Derivamos minutos y segundos del tiempo restante
-    val minutos by remember { derivedStateOf { remainingTimeInSeconds / 60 } }
-    val segundos by remember { derivedStateOf { remainingTimeInSeconds % 60 } }
-
-
     val levelComplete by remember { derivedStateOf { cards.all { it.state == CardState.MATCHED } && cards.isNotEmpty() } }
-    val movesExceeded =
-        !relaxMode && currentLevel.movimientosMax > 0 && movimientos >= currentLevel.movimientosMax
-
-    // --- CAMBIO 2: 'timeUp' ahora se basa en el nuevo estado ---
-    val timeUp = !relaxMode && remainingTimeInSeconds <= 0
+    val movesExceeded = !relaxMode && currentLevel.movimientosMax > 0 && movimientos >= currentLevel.movimientosMax
+    val timeUp = !relaxMode && minutos == 0 && segundos == 0
     val isGameOver = (movesExceeded || timeUp) && !levelComplete
 
-    // Efecto para la lógica de comparación de cartas (sin cambios)
+    // Efecto para la lógica de comparación de cartas
     LaunchedEffect(cards) {
         val discoveredCards = cards.filter { it.state == CardState.DISCOVERED }
 
@@ -232,27 +207,25 @@ fun GameMemoryApp(
 
             if (card1.symbol == card2.symbol) {
                 soundPlayer?.playMatchSound()
-                cards =
-                    cards.map { if (it.state == CardState.DISCOVERED) it.copy(state = CardState.MATCHED) else it }
+                cards = cards.map { if (it.state == CardState.DISCOVERED) it.copy(state = CardState.MATCHED) else it }
             } else {
                 soundPlayer?.playErrorSound()
                 delay(1000L)
-                cards =
-                    cards.map { if (it.state == CardState.DISCOVERED) it.copy(state = CardState.HIDDEN) else it }
+                cards = cards.map { if (it.state == CardState.DISCOVERED) it.copy(state = CardState.HIDDEN) else it }
             }
             isComparing = false
         }
     }
 
-    // --- CAMBIO 3: El LaunchedEffect del cronómetro es ahora mucho más simple ---
+    // Efecto para el cronómetro
     if (!relaxMode && !LocalInspectionMode.current) {
         LaunchedEffect(currentLevelIndex, isGameOver, levelComplete) {
-            // El cronómetro solo se ejecuta si el juego está activo
-            if (!isGameOver && !levelComplete) {
-                while (remainingTimeInSeconds > 0) {
-                    delay(1000L)
-                    remainingTimeInSeconds--
-                }
+            var totalSeconds = currentLevel.timeLimitSeconds
+             while (totalSeconds > 0 && !isGameOver && !levelComplete) {
+                delay(1000L)
+                totalSeconds--
+                minutos = totalSeconds / 60
+                segundos = totalSeconds % 60
             }
         }
     }
@@ -261,29 +234,13 @@ fun GameMemoryApp(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Nivel ${formatNumber(currentLevelIndex + 1)}") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            Icons.Default.ArrowBack,
-                            "Volver"
-                        )
-                    }
-                },
+                navigationIcon = { IconButton(onClick = onNavigateBack) { Icon(Icons.Default.ArrowBack, "Volver") } },
                 actions = {
                     Box {
-                        IconButton(onClick = { menuExpanded = true }) {
-                            Icon(
-                                Icons.Default.MoreVert,
-                                "Menú"
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false }) {
+                        IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, "Menú") }
+                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                             levels.forEachIndexed { index, _ ->
-                                DropdownMenuItem(
-                                    text = { Text("Nivel ${index + 1}") },
-                                    onClick = { currentLevelIndex = index; menuExpanded = false })
+                                DropdownMenuItem(text = { Text("Nivel ${index + 1}") }, onClick = { currentLevelIndex = index; menuExpanded = false })
                             }
                         }
                     }
@@ -291,38 +248,20 @@ fun GameMemoryApp(
             )
         }
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.SpaceAround,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                val movesText =
-                    if (!relaxMode && currentLevel.movimientosMax > 0) "$movimientos / ${currentLevel.movimientosMax}" else "$movimientos"
+        Column(modifier = Modifier.padding(innerPadding).fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(horizontalArrangement = Arrangement.SpaceAround, modifier = Modifier.fillMaxWidth()) {
+                val movesText = if (!relaxMode && currentLevel.movimientosMax > 0) "$movimientos / ${currentLevel.movimientosMax}" else "$movimientos"
                 Text("Movimientos: $movesText", style = MaterialTheme.typography.bodyLarge)
-                if (!relaxMode) Text(
-                    "Tiempo: ${formatNumber(minutos)}:${formatNumber(segundos)}",
-                    style = MaterialTheme.typography.bodyLarge
-                )
+                if (!relaxMode) Text("Tiempo: ${formatNumber(minutos)}:${formatNumber(segundos)}", style = MaterialTheme.typography.bodyLarge)
             }
             Spacer(modifier = Modifier.height(20.dp))
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(currentLevel.columns),
-                modifier = Modifier.weight(1f),
-                userScrollEnabled = false
-            ) {
+            LazyVerticalGrid(columns = GridCells.Fixed(currentLevel.columns), modifier = Modifier.weight(1f), userScrollEnabled = false) {
                 items(cards.size) { index ->
                     val card = cards[index]
                     CardView(card = card, isClickable = !isComparing, onClick = {
                         if (card.state == CardState.HIDDEN && cards.count { it.state == CardState.DISCOVERED } < 2) {
                             soundPlayer?.playFlipSound()
-                            cards = cards.toMutableList()
-                                .also { it[index] = card.copy(state = CardState.DISCOVERED) }
+                            cards = cards.toMutableList().also { it[index] = card.copy(state = CardState.DISCOVERED) }
                         }
                     })
                 }
@@ -330,54 +269,51 @@ fun GameMemoryApp(
             Spacer(modifier = Modifier.height(20.dp))
             Box(modifier = Modifier.height(60.dp), contentAlignment = Alignment.Center) {
                 when {
-                    levelComplete && currentLevelIndex < levels.size - 1 -> Button(onClick = { currentLevelIndex++ }) {
-                        Text(
-                            "Siguiente Nivel"
-                        )
-                    }
-
-                    levelComplete && currentLevelIndex >= levels.size - 1 -> Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
+                    levelComplete && currentLevelIndex < levels.size - 1 -> Button(onClick = { currentLevelIndex++ }) { Text("Siguiente Nivel") }
+                    levelComplete && currentLevelIndex >= levels.size - 1 -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("¡Has ganado!", style = MaterialTheme.typography.headlineMedium)
                         Button(onClick = onNavigateBack) { Text("Menú de niveles") }
                     }
-
                     isGameOver -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        val reason =
-                            if (movesExceeded) "Límite de movimientos" else "Se acabó el tiempo"
-                        Text(
-                            "¡Juego Terminado! - $reason",
-                            style = MaterialTheme.typography.titleMedium
-                        )
+                        val reason = if (movesExceeded) "Límite de movimientos" else "Se acabó el tiempo"
+                        Text("¡Juego Terminado! - $reason", style = MaterialTheme.typography.titleMedium)
                         Button(onClick = onNavigateBack) { Text("Menú de niveles") }
                     }
-
                     else -> Button(onClick = {
                         cards = generateCards(currentLevel.tarjetas)
                         movimientos = 0
-                        // --- CAMBIO 4: Reiniciar el tiempo restante ---
-                        remainingTimeInSeconds = currentLevel.timeLimitSeconds
+                        minutos = currentLevel.timeLimitSeconds / 60
+                        segundos = currentLevel.timeLimitSeconds % 60
                     }) { Text("Reiniciar Nivel") }
                 }
             }
         }
     }
 }
+
 @Composable
 fun CardView(card: Card, isClickable: Boolean, onClick: () -> Unit) {
+    val alpha by animateFloatAsState(
+        targetValue = if (card.state == CardState.MATCHED) 0f else 1f,
+        animationSpec = tween(durationMillis = 500)
+    )
+
     val cardColor = when (card.state) {
         CardState.ERROR -> Color.Red.copy(alpha = 0.5f)
         CardState.MATCHED -> Color.Green.copy(alpha = 0.5f)
         else -> MaterialTheme.colorScheme.surface
     }
-    Box(modifier = Modifier
-        .sizeIn(minWidth = 60.dp, minHeight = 80.dp)
-        .background(cardColor, shape = RoundedCornerShape(8.dp))
-        .padding(4.dp)
-        .clickable(enabled = card.state == CardState.HIDDEN && isClickable) { onClick() }
-        .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-        .padding(8.dp), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = Modifier
+            .graphicsLayer { this.alpha = alpha } // Aplica la animación de desvanecimiento
+            .sizeIn(minWidth = 60.dp, minHeight = 80.dp)
+            .background(cardColor, shape = RoundedCornerShape(8.dp))
+            .padding(4.dp)
+            .clickable(enabled = card.state == CardState.HIDDEN && isClickable) { onClick() }
+            .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+            .padding(8.dp),
+        contentAlignment = Alignment.Center
+    ) {
         if (card.state != CardState.HIDDEN) {
             Text(text = card.symbol, style = MaterialTheme.typography.headlineMedium)
         }
