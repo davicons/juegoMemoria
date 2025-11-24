@@ -38,13 +38,11 @@ sealed class GameScreen {
     data class Playing(val startLevelIndex: Int, val relaxMode: Boolean) : GameScreen()
 }
 
-private val grupoTarjetas = listOf(
-    listOf("🦄", "🍦"),
-    listOf("🌈", "👽"),
-    listOf("👾", "🤖", "👹", "👺"),
-    listOf("🤡", "💩", "🎃", "🙀"),
-    listOf("☠️", "👾", "😽", "😼")
-)
+// Lista única de todos los símbolos disponibles para una progresión más suave.
+private val allSymbols = listOf(
+    "🦄", "🍦", "🌈", "👽", "👾", "🤖", "👹", "👺",
+    "🤡", "💩", "🎃", "🙀", "☠️", "😽", "😼", "🦊"
+).shuffled()
 
 data class LevelData(
     val tarjetas: List<String>,
@@ -53,12 +51,13 @@ data class LevelData(
     val columns: Int
 )
 
+// Nueva definición de niveles con una curva de dificultad más gradual.
 private val levels = listOf(
-    LevelData(tarjetas = grupoTarjetas[0], movimientosMax = 3, timeLimitSeconds = 10, columns = 2),
-    LevelData(tarjetas = grupoTarjetas[0] + grupoTarjetas[1], movimientosMax = 8, timeLimitSeconds = 30, columns = 2),
-    LevelData(tarjetas = grupoTarjetas[0] + grupoTarjetas[1] + grupoTarjetas[2], movimientosMax = 12, timeLimitSeconds = 45, columns = 3),
-    LevelData(tarjetas = grupoTarjetas[0] + grupoTarjetas[1] + grupoTarjetas[2] + grupoTarjetas[3], movimientosMax = 25, timeLimitSeconds = 60, columns = 4),
-    LevelData(tarjetas = grupoTarjetas[0] + grupoTarjetas[1] + grupoTarjetas[2] + grupoTarjetas[3] + grupoTarjetas[4], movimientosMax = 60, timeLimitSeconds = 90, columns = 4)
+    LevelData(tarjetas = allSymbols.take(2), movimientosMax = 5, timeLimitSeconds = 15, columns = 2),   // Nivel 1: 2x2 (4 tarjetas)
+    LevelData(tarjetas = allSymbols.take(3), movimientosMax = 8, timeLimitSeconds = 25, columns = 2),   // Nivel 2: 2x3 (6 tarjetas)
+    LevelData(tarjetas = allSymbols.take(4), movimientosMax = 12, timeLimitSeconds = 40, columns = 2),  // Nivel 3: 2x4 (8 tarjetas)
+    LevelData(tarjetas = allSymbols.take(6), movimientosMax = 20, timeLimitSeconds = 60, columns = 3),  // Nivel 4: 3x4 (12 tarjetas)
+    LevelData(tarjetas = allSymbols.take(8), movimientosMax = 30, timeLimitSeconds = 90, columns = 4)   // Nivel 5: 4x4 (16 tarjetas)
 )
 
 enum class CardState { HIDDEN, DISCOVERED, MATCHED, ERROR }
@@ -183,14 +182,20 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
     var currentLevelIndex by remember { mutableStateOf(startLevelIndex) }
     val currentLevel = levels.getOrElse(currentLevelIndex) { levels.first() }
 
+    // Estas variables ahora se reinician AUTOMÁTICAMENTE cuando 'currentLevelIndex' cambia
     var cards by remember(currentLevelIndex) { mutableStateOf(generateCards(currentLevel.tarjetas)) }
     var movimientos by remember(currentLevelIndex) { mutableStateOf(0) }
     var segundos by remember(currentLevelIndex) { mutableStateOf(currentLevel.timeLimitSeconds % 60) }
     var minutos by remember(currentLevelIndex) { mutableStateOf(currentLevel.timeLimitSeconds / 60) }
+
+    // Estas son variables de estado transitorias dentro de un nivel
     var menuExpanded by remember { mutableStateOf(false) }
     var isComparing by remember { mutableStateOf(false) }
+    var levelTransitioning by remember(currentLevelIndex) { mutableStateOf(false) }
 
-    val levelComplete by remember { derivedStateOf { cards.all { it.state == CardState.MATCHED } && cards.isNotEmpty() } }
+    val levelComplete by remember(cards, currentLevelIndex) { 
+        derivedStateOf { cards.all { it.state == CardState.MATCHED } && cards.isNotEmpty() } 
+    }
     val movesExceeded = !relaxMode && currentLevel.movimientosMax > 0 && movimientos >= currentLevel.movimientosMax
     val timeUp = !relaxMode && minutos == 0 && segundos == 0
     val isGameOver = (movesExceeded || timeUp) && !levelComplete
@@ -220,8 +225,13 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
     // Efecto para el cronómetro
     if (!relaxMode && !LocalInspectionMode.current) {
         LaunchedEffect(currentLevelIndex, isGameOver, levelComplete) {
-            var totalSeconds = currentLevel.timeLimitSeconds
-             while (totalSeconds > 0 && !isGameOver && !levelComplete) {
+            // Reiniciar el tiempo cuando cambia el nivel
+            val level = levels.getOrElse(currentLevelIndex) { levels.first() }
+            var totalSeconds = level.timeLimitSeconds
+            minutos = totalSeconds / 60
+            segundos = totalSeconds % 60
+            
+            while (totalSeconds > 0 && !isGameOver && !levelComplete) {
                 delay(1000L)
                 totalSeconds--
                 minutos = totalSeconds / 60
@@ -255,7 +265,13 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
                 if (!relaxMode) Text("Tiempo: ${formatNumber(minutos)}:${formatNumber(segundos)}", style = MaterialTheme.typography.bodyLarge)
             }
             Spacer(modifier = Modifier.height(20.dp))
-            LazyVerticalGrid(columns = GridCells.Fixed(currentLevel.columns), modifier = Modifier.weight(1f), userScrollEnabled = false) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(currentLevel.columns),
+                modifier = Modifier.weight(1f),
+                userScrollEnabled = false,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 items(cards.size) { index ->
                     val card = cards[index]
                     CardView(card = card, isClickable = !isComparing, onClick = {
@@ -269,10 +285,25 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
             Spacer(modifier = Modifier.height(20.dp))
             Box(modifier = Modifier.height(60.dp), contentAlignment = Alignment.Center) {
                 when {
-                    levelComplete && currentLevelIndex < levels.size - 1 -> Button(onClick = { currentLevelIndex++ }) { Text("Siguiente Nivel") }
-                    levelComplete && currentLevelIndex >= levels.size - 1 -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("¡Has ganado!", style = MaterialTheme.typography.headlineMedium)
-                        Button(onClick = onNavigateBack) { Text("Menú de niveles") }
+                    levelComplete -> {
+                        if (currentLevelIndex < levels.size - 1) {
+                            // Nivel intermedio superado
+                            Text("¡Nivel superado!", style = MaterialTheme.typography.headlineMedium)
+                            // Efecto que se lanza cuando se completa un nivel
+                            LaunchedEffect(levelComplete) {
+                                if (levelComplete && !levelTransitioning && currentLevelIndex < levels.size - 1) {
+                                    levelTransitioning = true
+                                    delay(2000L) // Espera 2 segundos
+                                    currentLevelIndex++
+                                }
+                            }
+                        } else {
+                            // Último nivel superado
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("¡Has ganado!", style = MaterialTheme.typography.headlineMedium)
+                                Button(onClick = onNavigateBack) { Text("Menú de niveles") }
+                            }
+                        }
                     }
                     isGameOver -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         val reason = if (movesExceeded) "Límite de movimientos" else "Se acabó el tiempo"
@@ -280,10 +311,10 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
                         Button(onClick = onNavigateBack) { Text("Menú de niveles") }
                     }
                     else -> Button(onClick = {
-                        cards = generateCards(currentLevel.tarjetas)
-                        movimientos = 0
-                        minutos = currentLevel.timeLimitSeconds / 60
-                        segundos = currentLevel.timeLimitSeconds % 60
+                        // Reiniciar nivel manualmente
+                        val currentIdx = currentLevelIndex
+                        currentLevelIndex = -1 // Truco para forzar la re-inicialización
+                        currentLevelIndex = currentIdx
                     }) { Text("Reiniciar Nivel") }
                 }
             }
