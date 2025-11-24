@@ -283,7 +283,13 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
                 }
             }
             Spacer(modifier = Modifier.height(20.dp))
-            Box(modifier = Modifier.height(60.dp), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .wrapContentHeight()
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 when {
                     levelComplete -> {
                         if (currentLevelIndex < levels.size - 1) {
@@ -299,13 +305,19 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
                             }
                         } else {
                             // Último nivel superado
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
                                 Text("¡Has ganado!", style = MaterialTheme.typography.headlineMedium)
                                 Button(onClick = onNavigateBack) { Text("Menú de niveles") }
                             }
                         }
                     }
-                    isGameOver -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    isGameOver -> Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
                         val reason = if (movesExceeded) "Límite de movimientos" else "Se acabó el tiempo"
                         Text("¡Juego Terminado! - $reason", style = MaterialTheme.typography.titleMedium)
                         Button(onClick = onNavigateBack) { Text("Menú de niveles") }
