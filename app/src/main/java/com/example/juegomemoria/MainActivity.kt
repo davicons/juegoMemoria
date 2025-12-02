@@ -396,21 +396,33 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
     // Estado del nivel actual (puede cambiar durante el juego)
     var currentLevelIndex by remember { mutableStateOf(startLevelIndex) }
     val currentLevel = levels.getOrElse(currentLevelIndex) { levels.first() }
+    
+    // ========================================================================
+    // CONTADOR DE REINICIO PARA SINCRONIZAR TODOS LOS ESTADOS
+    // ========================================================================
+    // Este contador se incrementa cada vez que se reinicia el nivel.
+    // Se usa como key en los remember() para forzar la reinicialización
+    // de todas las variables de estado relacionadas con el nivel.
+    var restartCounter by remember { mutableStateOf(0) }
+    
+    // Key compuesta que incluye el nivel y el contador de reinicio
+    // Esto asegura que todo se reinicie cuando cambia el nivel o se presiona reiniciar
+    val levelKey = currentLevelIndex to restartCounter
 
     // ========================================================================
-    // ESTADO QUE SE REINICIA AL CAMBIAR DE NIVEL
+    // ESTADO QUE SE REINICIA AL CAMBIAR DE NIVEL O REINICIAR
     // ========================================================================
-    // Estas variables se reinician automáticamente cuando 'currentLevelIndex' cambia
-    // gracias a la key del remember(). Esto es crucial para la transición entre niveles.
+    // Estas variables se reinician automáticamente cuando 'levelKey' cambia.
+    // Esto asegura que tanto el cambio de nivel como el reinicio funcionen correctamente.
     
-    var cards by remember(currentLevelIndex) { 
+    var cards by remember(levelKey) { 
         mutableStateOf(generateCards(currentLevel.tarjetas)) 
     }
-    var movimientos by remember(currentLevelIndex) { mutableStateOf(0) }
-    var segundos by remember(currentLevelIndex) { 
+    var movimientos by remember(levelKey) { mutableStateOf(0) }
+    var segundos by remember(levelKey) { 
         mutableStateOf(currentLevel.timeLimitSeconds % 60) 
     }
-    var minutos by remember(currentLevelIndex) { 
+    var minutos by remember(levelKey) { 
         mutableStateOf(currentLevel.timeLimitSeconds / 60) 
     }
 
@@ -418,7 +430,7 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
     // ESTADO TRANSITORIO DENTRO DE UN NIVEL
     // ========================================================================
     // Estas variables no se reinician al cambiar de nivel porque no dependen
-    // del currentLevelIndex en el remember()
+    // del levelKey en el remember()
     
     var menuExpanded by remember { mutableStateOf(false) }  // Control del menú desplegable
     var isComparing by remember { mutableStateOf(false) }    // Indica si se están comparando tarjetas
@@ -501,13 +513,15 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
      * 
      * Se reinicia cuando:
      * - Cambia el nivel (currentLevelIndex)
+     * - Se reinicia el nivel (restartCounter cambia)
      * - El juego termina (isGameOver)
      * - Se completa el nivel (levelComplete)
      * 
      * El cronómetro cuenta regresivamente desde el tiempo límite del nivel.
+     * IMPORTANTE: Usa levelKey para reiniciarse correctamente cuando se presiona "Reiniciar Nivel"
      */
     if (!relaxMode && !LocalInspectionMode.current) {
-        LaunchedEffect(currentLevelIndex, isGameOver, levelComplete) {
+        LaunchedEffect(levelKey, isGameOver, levelComplete) {
             val level = levels.getOrElse(currentLevelIndex) { levels.first() }
             var totalSeconds = level.timeLimitSeconds
             
@@ -559,6 +573,7 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
                                     text = { Text("Nivel ${index + 1}") }, 
                                     onClick = { 
                                         currentLevelIndex = index
+                                        restartCounter = 0  // Reinicia el contador al cambiar de nivel
                                         menuExpanded = false 
                                     }
                                 )
@@ -670,6 +685,7 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
                                 if (levelComplete) {
                                     delay(2000L)  // Espera 2 segundos
                                     currentLevelIndex++  // Avanza automáticamente al siguiente nivel
+                                    restartCounter = 0  // Reinicia el contador para el nuevo nivel
                                 }
                             }
                         } else {
@@ -703,11 +719,10 @@ fun GameMemoryApp(soundPlayer: SoundPlayer?, startLevelIndex: Int, relaxMode: Bo
                     }
                     else -> Button(onClick = {
                         // Botón para reiniciar el nivel manualmente
-                        // Truco: Cambiar temporalmente el índice fuerza la re-inicialización
-                        // de todas las variables que dependen de currentLevelIndex
-                        val currentIdx = currentLevelIndex
-                        currentLevelIndex = -1  // Fuerza la re-inicialización
-                        currentLevelIndex = currentIdx  // Restaura el nivel
+                        // Incrementa el contador de reinicio para forzar la reinicialización
+                        // de todas las variables que usan levelKey como dependencia.
+                        // Esto reinicia: tarjetas, movimientos, tiempo y cronómetro.
+                        restartCounter++
                     }) { Text("Reiniciar Nivel") }
                 }
             }
